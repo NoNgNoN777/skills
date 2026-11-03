@@ -1,0 +1,10 @@
+# ไฟล์ที่เกิดตอนใช้งาน ไม่ควรขึ้น git (คำตอบของ Gemini, ผลค้นหาค่า, ค่าที่ตั้งเอง, ไฟล์สำรอง)
+to-claude/
+config.json
+override.json
+*.bak-*
+__pycache__/
+sends.jsonl
+user-rules.md
+# zip ที่ทำไว้ส่งต่อเอง (สำเนาของ dist/ กับ skills/ ที่อยู่ใน repo แล้ว)
+*.zip
