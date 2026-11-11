@@ -1,9 +1,22 @@
-# ฟังก์ชันกลางของฝั่ง Codex และ Claude Code (หา exe, รายชื่อแชท Codex, ไฟล์ประวัติ) · ai-bridge
+﻿# ฟังก์ชันกลางของฝั่ง Codex และ Claude Code (หา exe, รายชื่อแชท Codex, ไฟล์ประวัติ, เรียกโปรแกรมภายนอก) · ai-bridge
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
 $OutputEncoding = [Text.UTF8Encoding]::new($false)
 
 $CodexHome = if ($env:CODEX_HOME) { $env:CODEX_HOME } else { Join-Path $HOME '.codex' }
+
+# เรียกโปรแกรมภายนอกแล้วคืน @{ Out = <บรรทัด stdout+stderr>; Code = <exit code> }
+# PS 5.1 ที่ ErrorActionPreference=Stop จะ throw ทันทีเมื่อโปรแกรมพิมพ์อะไรลง stderr (แม้เป็นแค่คำเตือน)
+# ทั้งที่งานสำเร็จแล้ว จึงลดเป็น Continue เฉพาะตอนเรียก แล้วตัดสินจาก exit code อย่างเดียว
+function Invoke-Native([string]$exe, [string[]]$argv, [string]$stdin) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        if ($PSBoundParameters.ContainsKey('stdin')) { $out = $stdin | & $exe @argv 2>&1 | ForEach-Object { "$_" } }
+        else { $out = & $exe @argv 2>&1 | ForEach-Object { "$_" } }
+        return @{ Out = @($out); Code = $LASTEXITCODE }
+    } finally { $ErrorActionPreference = $prev }
+}
 
 function Find-Codex {
     $cmd = Get-Command codex.exe -ErrorAction SilentlyContinue
@@ -17,13 +30,13 @@ function Find-Codex {
 }
 
 function Get-ClaudeVersion([string]$exe) {
-    $v = (& $exe --version 2>$null | Select-Object -First 1) -as [string]
+    try { $v = ((Invoke-Native $exe @('--version')).Out | Select-Object -First 1) -as [string] } catch { $v = '' }
     if ($v -match '(\d+\.\d+\.\d+)') { return [version]$Matches[1] }
     return [version]'0.0.0'
 }
 
 function Find-Claude {
-    # newest wins: an old claude.exe on PATH may lack ListAgents/SendMessage
+    # รุ่นใหม่สุดชนะ: claude.exe รุ่นเก่าใน PATH อาจไม่มีเครื่องมือ ListAgents/SendMessage
     $cands = @()
     $cmd = Get-Command claude.exe -All -ErrorAction SilentlyContinue
     if ($cmd) { $cands += $cmd | ForEach-Object { $_.Source } }
@@ -37,13 +50,13 @@ function Find-Claude {
 }
 
 function Get-CodexThreads {
-    # newest last in the file; return newest first, one row per id
+    # ในไฟล์ใหม่สุดอยู่ท้าย · คืนใหม่สุดก่อน แชทละแถว
     $f = Join-Path $CodexHome 'session_index.jsonl'
     if (-not (Test-Path $f)) { return @() }
     $rows = @{}
     foreach ($line in Get-Content $f -Encoding UTF8) {
         try { $o = $line | ConvertFrom-Json } catch { continue }
-        $rows[$o.id] = $o
+        if ($o -and $o.id) { $rows[[string]$o.id] = $o }
     }
     $rows.Values | Sort-Object updated_at -Descending
 }
@@ -53,7 +66,7 @@ function Resolve-CodexThread([string]$Thread) {
     $hit = @(Get-CodexThreads | Where-Object { $_.thread_name -eq $Thread })
     if ($hit.Count -eq 1) { return $hit[0].id }
     if ($hit.Count -gt 1) { throw "มีแชท Codex ชื่อ '$Thread' มากกว่า 1 อัน ให้ใช้ id แทน" }
-    throw "ไม่พบแชท Codex ชื่อ '$Thread' (ดูรายชื่อด้วย send-to-codex.ps1 -List)"
+    throw "ไม่พบแชท Codex ชื่อ '$Thread' (ดูรายชื่อด้วย ai-send.ps1 -To codex -List)"
 }
 
 function Find-CodexRollout([string]$Id) {
@@ -61,5 +74,5 @@ function Find-CodexRollout([string]$Id) {
         Sort-Object LastWriteTime -Descending | Select-Object -First 1
 }
 
-# Windows PowerShell 5.1 does not escape " inside native arguments
-function Protect-NativeArg([string]$s) { $s -replace '\\(?=\\*")', '\\' -replace '"', '\"' }
+# PS 5.1 ไม่ escape " ในอาร์กิวเมนต์ของโปรแกรมภายนอก: \ ที่อยู่หน้า " และ \ ท้ายข้อความต้องเพิ่มเป็นสองเท่า แล้ว " เป็น \"
+function Protect-NativeArg([string]$s) { ($s -replace '(\\+)(?=")', '$1$1' -replace '(\\+)$', '$1$1') -replace '"', '\"' }

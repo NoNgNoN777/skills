@@ -1,4 +1,4 @@
-# ai-bridge: คำสั่งกลางให้ Claude Code / Codex / Antigravity (Gemini) ส่งข้อความหากันได้ทุกทาง เข้าแชทเดิมที่เปิดอยู่
+﻿# ai-bridge: คำสั่งกลางให้ Claude Code / Codex / Antigravity (Gemini) ส่งข้อความหากันได้ทุกทาง เข้าแชทเดิมที่เปิดอยู่
 # ใช้ได้จากทุกฝั่ง ผลเหมือนกัน · ตัวส่งระดับล่าง: send-to-claude.ps1 / send-to-codex.ps1 / send-to-antigravity.ps1
 #
 #   ดูรายชื่อแชท:  & ai-send.ps1 -To claude|codex|gemini -List
@@ -55,17 +55,20 @@ try {
         # Gemini: send-to-antigravity.ps1 ใส่หัวข้อความ ตรวจความลับ แนบไฟล์ และบันทึกงานเอง
         [IO.File]::WriteAllText($tmp, $Message, [Text.UTF8Encoding]::new($false))
         $a = @{ MessageFile = $tmp; From = "$fromKind`:$fromId"; Sender = $Sender; ReplyRoute = "$fromKind`:$fromId" }
-        if ($New) { $a.New = $true; if ($Model) { $a.Model = $Model }; if ($Project) { $a.Project = $Project }; if ($Title) { $a.Title = $Title } }
+        if ($New) { $a.New = $true; if ($Model) { $a.Model = $Model }; if ($Project) { $a.Project = $Project }; $a.Title = $(if ($Title) { $Title } else { "จาก $Sender" }) }
         else { $a.ConvId = $Target }
         if ($Files) { $a.Files = $Files }; if ($Skills) { $a.Skills = $Skills }; if ($Root) { $a.Root = $Root }
         if ($Review) { $a.Review = $true }; if ($SkipSecretScan) { $a.SkipSecretScan = $true }; if ($NoReply) { $a.NoReply = $true }
-        $out = @(& (Join-Path $here 'send-to-antigravity.ps1') @a)
+        $out = @(& (Join-Path $here 'send-to-antigravity.ps1') @a)   # ส่งไม่ได้ = throw
         $out
-        if ($NoReply) { return }
+        if ($NoReply) { exit 0 }
         $msgId = $out[-1]
-        if ($Wait) { & (Join-Path $here 'wait-reply.ps1') -MsgId $msgId -TimeoutSec $TimeoutSec }
+        if ($Wait) {
+            & (Join-Path $here 'wait-reply.ps1') -MsgId $msgId -TimeoutSec $TimeoutSec
+            if ($LASTEXITCODE) { "รอต่อ: & `"$here\wait-reply.ps1`" -MsgId $msgId"; exit $LASTEXITCODE }
+        }
         else { "รอคำตอบภายหลังด้วย: & `"$here\wait-reply.ps1`" -MsgId $msgId" }
-        return
+        exit 0
     }
 
     # Claude / Codex: ใส่หัวข้อความเอง แล้วส่งตามตัว
@@ -81,6 +84,13 @@ try {
         if ($rules) { $Message += "`n`nข้อห้ามประจำของผู้ใช้ (ทำตามเสมอ):`n$rules" }
     }
     $msgId = (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + -join ((48..57 + 97..122) | Get-Random -Count 4 | ForEach-Object { [char]$_ })
+    # command line ของ Windows ยาวได้ ~32,767 ตัวอักษร (codex queue รับข้อความทาง argument) เนื้อหายาวจึงเขียนลงไฟล์แล้วส่งแค่ path
+    if ($Message.Length -gt 20000) {
+        $outbox = Join-Path $here 'outbox'; New-Item -ItemType Directory -Force $outbox | Out-Null
+        $bodyFile = Join-Path $outbox "$msgId.md"
+        [IO.File]::WriteAllText($bodyFile, $Message, [Text.UTF8Encoding]::new($false))
+        $Message = "เนื้อหายาว จึงอยู่ในไฟล์: $bodyFile`nอ่านไฟล์นั้นทั้งหมดก่อน (ทยอยอ่านเป็นช่วงถ้ายาว) แล้วถือเนื้อหาในไฟล์เป็นข้อความนี้"
+    }
     $replyCmd = "& `"`$HOME\.agent-bridge\ai-send.ps1`" -To $fromKind -Target $fromId -From $To`:<id แชทนี้> -NoReply -Message `"...`""
     $how = if ($NoReply) { 'reply=none: เป็นคำตอบหรือแจ้งให้ทราบ ไม่ต้องตอบกลับ อ่านแล้วทำงานต่อตามที่ผู้ใช้สั่งไว้' }
            elseif ($Wait -and $To -eq 'codex') { 'ผู้ส่งรออ่านคำตอบในแชทนี้อยู่: ตอบในแชทตามปกติ ไม่ต้องส่งกลับด้วยคำสั่ง' }
@@ -100,7 +110,9 @@ $Message
     } else {
         & (Join-Path $here 'send-to-claude.ps1') -To $Target -TextFile $tmp
     }
+    $code = $LASTEXITCODE   # สคริปต์ลูกจบด้วย exit 1 เมื่อส่งไม่ถึงหรือ TIMEOUT ต้องส่งต่อ ไม่งั้นผู้เรียกเข้าใจว่าสำเร็จ
     "msg_id=$msgId"
+    if ($code) { exit $code }
 } finally {
     Remove-Item -LiteralPath $tmp -ErrorAction SilentlyContinue
 }

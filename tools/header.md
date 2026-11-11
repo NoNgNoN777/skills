@@ -5,7 +5,7 @@ description: ไฟล์ติดตั้งระบบ ai-bridge ให้ C
 
 # ไฟล์ติดตั้ง ai-bridge: Claude Code ⇄ Codex ⇄ Antigravity (Gemini)
 
-<!-- AGB-VERSION: 2026.11.11.1 -->
+<!-- AGB-VERSION: 2026.11.11.2 -->
 
 ## สำหรับคน (อ่านส่วนนี้ส่วนเดียวพอ)
 

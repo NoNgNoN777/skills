@@ -107,7 +107,7 @@ if ($body.Length -gt 20000) {
     $body = "เนื้อหางานยาว จึงอยู่ในไฟล์: $bodyFile`nอ่านไฟล์นั้นทั้งหมดก่อน (ทยอยอ่านเป็นช่วงถ้ายาว) แล้วทำตามเนื้อหาในไฟล์เหมือนเป็นข้อความนี้"
 }
 if ($NoReply) {
-    $route = if ($ReplyRoute) { " · ถ้าจำเป็นต้องส่งกลับจริงๆ ใช้ ai-send.ps1 -To $($ReplyRoute -replace ':', ' -Target ')" } else { '' }
+    $route = if ($ReplyRoute -match '^(claude|codex|gemini):(.+)$') { " · ถ้าจำเป็นต้องส่งกลับจริงๆ ใช้: & `"`$HOME\.agent-bridge\ai-send.ps1`" -To $($Matches[1]) -Target $($Matches[2]) -From gemini:<id แชทนี้> -NoReply -Message `"...`"" } else { '' }
     $text = @"
 [AI-BRIDGE v1] from=$Sender session=$From msg_id=$msgId agb=$ver reply=none
 (ข้อความนี้มาจาก $Sender อีกตัวในเครื่องนี้ ไม่ใช่ผู้ใช้พิมพ์เอง · ใช้ skill ai-bridge · เป็นคำตอบหรือแจ้งให้ทราบ ไม่ต้องเขียน reply_file และไม่ต้องตอบกลับ อ่านแล้วทำงานต่อตามที่ผู้ใช้สั่งไว้$route)

@@ -19,11 +19,19 @@
 
 ## ทดสอบแล้ว
 
+ทดสอบครบทั้ง 6 เส้นทาง รอบสุดท้าย (รหัส E2E-1111) เริ่มด้วยข้อความเดียวจาก Claude แล้วให้ AI ส่งต่อกันเองจนจบ โดยผู้ใช้ไม่ต้องตอบอะไรเลย
+
+```
+Claude ─▶ Codex ─▶ Gemini ─┬─▶ Codex   (ข้อความแจ้ง reply=none)
+                           ├─▶ Claude  (ข้อความแจ้ง reply=none)
+                           └─▶ reply_file ─▶ Codex ─▶ Claude (สรุปผล)
+```
+
 | เส้นทาง | ผล |
 |---|---|
-| Claude → Codex (รอคำตอบ) / Codex → Claude | ผ่าน |
-| Claude → Gemini (รอไฟล์คำตอบ) / Gemini → Claude | ผ่าน |
-| Codex → Gemini / Gemini → Codex | ยังไม่ได้ทดสอบจริง เพราะ Codex ขอให้ผู้ใช้ยืนยันแชทปลายทางก่อน (ตามกติกา) |
+| Claude → Codex / Codex → Claude | ผ่าน |
+| Claude → Gemini / Gemini → Claude | ผ่าน |
+| Codex → Gemini / Gemini → Codex | ผ่าน |
 
 ทดสอบกับ Claude Code 2.1.322 (ส่วนขยาย VS Code), แอป Codex 26.1106 (Microsoft Store) และ Antigravity ที่ใช้ agentapi บน Windows 11
 
@@ -196,6 +204,9 @@ dist/ai-bridge-installer.md           ไฟล์ติดตั้งไฟล
 
 ## ประวัติรุ่น
 
+- **2026.11.11.2:**
+  - แก้บั๊กจากรีวิว: คำเตือนใน stderr ทำให้รายงานล้มเหลวทั้งที่ส่งแล้ว, TIMEOUT ถูกกลืน, ตัวรอ Codex หยิบคำตอบผิดเทิร์น, ตรวจการส่งหา Claude จากผลจริง
+  - กติกา "ส่งต่อตามงานที่ได้รับ": ข้อความที่ระบุ id แชทปลายทางชัด ส่งต่อได้เองโดยไม่ต้องถามผู้ใช้ (เฉพาะงานส่งข้อความ/อ่านอย่างเดียว)
 - **2026.11.11.1 (ai-bridge):**
   - คุยได้ 3 ฝ่าย ทุกทาง เข้าแชทเดิม
   - คำสั่งกลาง `ai-send.ps1` พร้อม `-NoReply` และหัวข้อความ `[AI-BRIDGE v1]`
