@@ -103,17 +103,29 @@ if ($projects.Count) { Ok "โปรเจกต์ใน Antigravity: $($projec
 else { Warn 'ไม่พบรายชื่อโปรเจกต์ใน ~/.gemini/*/projects/ (เปิดแชทใหม่อาจไม่ได้)' 'สร้างโปรเจกต์ในแอปก่อน หรือส่งเข้าแชทเดิมแทน' }
 
 # 6. skill ฝั่ง Gemini
-$gskill = "$HOME\.gemini\config\skills\claude-bridge\SKILL.md"
-if (Test-Path $gskill) { Ok "skill ฝั่ง Gemini: $gskill" } else { Bad "ไม่พบ $gskill" 'ติดตั้งไฟล์ claude-bridge\SKILL.md ตามไฟล์ติดตั้ง' }
+$gskill = "$HOME\.gemini\config\skills\ai-bridge\SKILL.md"
+if (Test-Path $gskill) { Ok "skill ฝั่ง Gemini: $gskill" } else { Bad "ไม่พบ $gskill" 'ติดตั้งไฟล์ ai-bridge\SKILL.md ตามไฟล์ติดตั้ง' }
 $docs = Get-ChildItem "$HOME\.gemini\*\builtin\skills\agy-customizations" -Recurse -Filter *.md -ErrorAction SilentlyContinue
 if ($docs) {
     if ($docs | Select-String -SimpleMatch '.gemini/config/skills' -Quiet) { Ok 'เอกสารในแอปยังระบุตำแหน่ง skill ส่วนกลางที่ ~/.gemini/config/skills/' }
-    else { Warn 'เอกสารในแอปไม่ได้พูดถึง ~/.gemini/config/skills/ แล้ว (ตำแหน่ง skill อาจเปลี่ยน)' "อ่าน $($docs[0].DirectoryName) หาตำแหน่ง Global skills ใหม่ แล้วย้าย claude-bridge ไปไว้ที่นั่น" }
+    else { Warn 'เอกสารในแอปไม่ได้พูดถึง ~/.gemini/config/skills/ แล้ว (ตำแหน่ง skill อาจเปลี่ยน)' "อ่าน $($docs[0].DirectoryName) หาตำแหน่ง Global skills ใหม่ แล้วย้าย ai-bridge ไปไว้ที่นั่น" }
 }
 
-# 7. skill ฝั่ง Claude + กล่องจดหมาย
-$cskill = "$HOME\.claude\skills\antigravity-bridge\SKILL.md"
-if (Test-Path $cskill) { Ok "skill ฝั่ง Claude: $cskill" } else { Bad "ไม่พบ $cskill" 'ติดตั้งไฟล์ antigravity-bridge\SKILL.md ตามไฟล์ติดตั้ง' }
+# 7. skill ฝั่ง Claude / Codex + กล่องจดหมาย
+$cskill = "$HOME\.claude\skills\ai-bridge\SKILL.md"
+if (Test-Path $cskill) { Ok "skill ฝั่ง Claude: $cskill" } else { Bad "ไม่พบ $cskill" 'ติดตั้งไฟล์ ai-bridge\SKILL.md ตามไฟล์ติดตั้ง' }
+$xskill = "$HOME\.codex\skills\ai-bridge\SKILL.md"
+if (Test-Path $xskill) { Ok "skill ฝั่ง Codex: $xskill" } else { Warn "ไม่พบ $xskill" 'ไม่ใช้ Codex ก็ข้ามได้ · ถ้าใช้ ให้ติดตั้งใหม่' }
+foreach ($old in "$HOME\.claude\skills\antigravity-bridge", "$HOME\.gemini\config\skills\claude-bridge", "$HOME\.claude\skills\claude-codex-bridge", "$HOME\.codex\skills\claude-codex-bridge") {
+    if (Test-Path $old) { Warn "ยังมี skill รุ่นเก่า: $old (ซ้ำกับ ai-bridge)" 'ติดตั้งใหม่ ตัวติดตั้งจะย้ายไป backup ให้' }
+}
+# 8. ฝั่ง Codex / Claude (ai-send -To codex / -To claude)
+try {
+    . (Join-Path $PSScriptRoot 'cc-common.ps1')
+    $ErrorActionPreference = 'Continue'
+    try { Ok "codex.exe: $(Find-Codex)" } catch { Warn 'ไม่พบ codex.exe (ส่งหา Codex ไม่ได้)' 'ติดตั้งแอป Codex หรือ Codex CLI' }
+    try { $ce = Find-Claude; Ok "claude.exe: $ce (รุ่น $(Get-ClaudeVersion $ce))" } catch { Warn 'ไม่พบ claude.exe (ส่งหา Claude ไม่ได้)' 'ติดตั้ง Claude Code CLI หรือส่วนขยายใน VS Code' }
+} catch { Warn "ตรวจฝั่ง Codex/Claude ไม่ได้: $($_.Exception.Message)" 'ติดตั้งใหม่ (cc-common.ps1 อาจหาย)' }
 New-Item -ItemType Directory -Force $AgbInbox | Out-Null; Ok "กล่องจดหมายคำตอบ: $AgbInbox"
 
 Write-Output "== สรุป: FAIL $fail · WARN $warn"

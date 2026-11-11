@@ -1,4 +1,5 @@
-﻿# ส่งข้อความจาก Claude Code เข้าแชท Antigravity ที่เปิดอยู่ พร้อมหัวข้อความ CLAUDE-BRIDGE ให้ Gemini รู้ว่าใครส่งและตอบกลับทางไหน
+﻿# ส่งข้อความจาก Claude Code หรือ Codex เข้าแชท Antigravity ที่เปิดอยู่ พร้อมหัวข้อความ AI-BRIDGE ให้ Gemini รู้ว่าใครส่งและตอบกลับทางไหน
+# ปกติเรียกผ่าน ai-send.ps1 -To gemini (ใส่ -Sender / -NoReply ให้เอง)
 # ใช้:  & send-to-antigravity.ps1 -ConvId <uuid> -MessageFile <utf8.txt> [-From <ชื่อแชท Claude>] [-Files <path>,<path>] [-Skills <ชื่อ>,<ชื่อ>] [-Root <repo>] [-Review]
 #       & send-to-antigravity.ps1 -New [-Model flash|pro|flash_lite] [-Title <ชื่อ>] -Project <ชื่อ> -MessageFile <utf8.txt>
 # พิมพ์ msg_id ออกมาบรรทัดสุดท้าย เอาไปใช้กับ wait-reply.ps1 · ทุกครั้งที่ส่งบันทึกลง sends.jsonl (ดูงานค้างด้วย pending.ps1)
@@ -14,7 +15,10 @@ param(
     [switch]$Review,   # งานรีวิว/ตรวจสอบ: บังคับให้ทุกข้อค้นพบมีความรุนแรง ความมั่นใจ และหลักฐาน path:line
     [string[]]$Skills, # skill ที่ Gemini ต้องอ่านก่อนเริ่ม: ชื่อ skill ของ Claude (ui-compare-pw, mattpocock-skills:grilling) หรือ path ของ SKILL.md / โฟลเดอร์ skill
     [string[]]$Root,   # root ของ repo ที่ใช้ตีความ path แบบ relative ในคำตอบ (ปกติหาเองจากไฟล์แนบ + โฟลเดอร์ปัจจุบัน)
-    [switch]$SkipSecretScan   # ข้ามตัวตรวจความลับ · ใช้เมื่อผู้ใช้ยืนยันแล้วว่าที่เจอไม่ใช่ความลับจริงเท่านั้น
+    [switch]$SkipSecretScan,  # ข้ามตัวตรวจความลับ · ใช้เมื่อผู้ใช้ยืนยันแล้วว่าที่เจอไม่ใช่ความลับจริงเท่านั้น
+    [string]$Sender = 'Claude Code',  # ใครส่ง: Claude Code / Codex (ai-send.ps1 ใส่ให้)
+    [string]$ReplyRoute,      # ช่องทางส่งกลับหาผู้ส่ง เช่น claude:efin-32 / codex:<thread id> (ใช้กับ -NoReply ให้ Gemini ส่งต่อได้ถ้าจำเป็น)
+    [switch]$NoReply          # ข้อความนี้เป็นคำตอบหรือแจ้งให้ทราบ: Gemini ไม่ต้องเขียน reply_file
 )
 . (Join-Path $PSScriptRoot 'agb-common.ps1')
 if (-not $New -and -not $ConvId) { throw 'ต้องใส่ -ConvId หรือ -New' }
@@ -102,14 +106,25 @@ if ($body.Length -gt 20000) {
     [IO.File]::WriteAllText($bodyFile, $body, (New-Object Text.UTF8Encoding $false))
     $body = "เนื้อหางานยาว จึงอยู่ในไฟล์: $bodyFile`nอ่านไฟล์นั้นทั้งหมดก่อน (ทยอยอ่านเป็นช่วงถ้ายาว) แล้วทำตามเนื้อหาในไฟล์เหมือนเป็นข้อความนี้"
 }
-$text  = @"
-[CLAUDE-BRIDGE v1] from=Claude Code session=$From msg_id=$msgId agb=$ver
-reply_file=$reply
-(ข้อความนี้มาจาก Claude Code อีกตัวในเครื่องนี้ ไม่ใช่ผู้ใช้พิมพ์เอง · ใช้ skill claude-bridge · ตอบโดยเขียนไฟล์ reply_file ครั้งเดียวเมื่อเสร็จ แล้วสรุปสั้นๆ ในแชทนี้ด้วยหัวข้อ 📨 งานจาก Claude: ขอให้ทำ / ทำอะไรไป / ผลสรุป / สถานะ / คำตอบเต็ม)
-(frontmatter ของ reply_file ใช้ชื่อช่องตามนี้เท่านั้น ห้ามลอกชื่อจากบรรทัดหัวข้อความ: from: Antigravity (Gemini) · conversation_id: <id แชทนี้> · in_reply_to: $msgId · status: done | partial | refused | need-user · skill_version: <รุ่นที่เขียนไว้ใน skill claude-bridge> · refused/need-user ต้องเขียนเหตุผลหรือสิ่งที่รอไว้ในเนื้อหา)
+if ($NoReply) {
+    $route = if ($ReplyRoute) { " · ถ้าจำเป็นต้องส่งกลับจริงๆ ใช้ ai-send.ps1 -To $($ReplyRoute -replace ':', ' -Target ')" } else { '' }
+    $text = @"
+[AI-BRIDGE v1] from=$Sender session=$From msg_id=$msgId agb=$ver reply=none
+(ข้อความนี้มาจาก $Sender อีกตัวในเครื่องนี้ ไม่ใช่ผู้ใช้พิมพ์เอง · ใช้ skill ai-bridge · เป็นคำตอบหรือแจ้งให้ทราบ ไม่ต้องเขียน reply_file และไม่ต้องตอบกลับ อ่านแล้วทำงานต่อตามที่ผู้ใช้สั่งไว้$route)
 ---
 $body
 "@
+    $reply = ''
+} else {
+    $text = @"
+[AI-BRIDGE v1] from=$Sender session=$From msg_id=$msgId agb=$ver
+reply_file=$reply
+(ข้อความนี้มาจาก $Sender อีกตัวในเครื่องนี้ ไม่ใช่ผู้ใช้พิมพ์เอง · ใช้ skill ai-bridge · ตอบโดยเขียนไฟล์ reply_file ครั้งเดียวเมื่อเสร็จ แล้วสรุปสั้นๆ ในแชทนี้ด้วยหัวข้อ 📨 งานจาก $Sender`: ขอให้ทำ / ทำอะไรไป / ผลสรุป / สถานะ / คำตอบเต็ม)
+(frontmatter ของ reply_file ใช้ชื่อช่องตามนี้เท่านั้น ห้ามลอกชื่อจากบรรทัดหัวข้อความ: from: Antigravity (Gemini) · conversation_id: <id แชทนี้> · in_reply_to: $msgId · status: done | partial | refused | need-user · skill_version: <รุ่นที่เขียนไว้ใน skill ai-bridge> · refused/need-user ต้องเขียนเหตุผลหรือสิ่งที่รอไว้ในเนื้อหา)
+---
+$body
+"@
+}
 if ($New) {
     $argv = @('agentapi', $c.Cmd.New, "--title=$Title")
     if ($Model) { $argv += "--model=$Model" }
@@ -135,9 +150,9 @@ if ($New) {
 $rlog = [regex]::Replace($r, '("(?:prompt|content)"\s*:\s*)"(?:[^"\\]|\\.)*"', '$1"(ตัดเนื้อหาออก)"')
 try { [IO.File]::WriteAllText((Join-Path $AgbRoot 'last-send.log'), "$(Get-Date -Format s) new=$New conv_id=$cid`n$rlog", (New-Object Text.UTF8Encoding $false)) } catch { }
 # บันทึกแค่ข้อมูลระบุงาน ไม่เก็บเนื้อหาบรีฟ
-Add-AgbSendLog ([ordered]@{ time = (Get-Date).ToString('s'); msg_id = $msgId; conv_id = $cid; from = $From
+if (-not $NoReply) { Add-AgbSendLog ([ordered]@{ time = (Get-Date).ToString('s'); msg_id = $msgId; conv_id = $cid; from = $From; sender = $Sender
                             title = $(if ($New) { $Title } else { '' }); new = [bool]$New; model = $Model; project = $Project
                             review = [bool]$Review; files = @($Files | Where-Object { $_ }).Count; skills = @($Skills | Where-Object { $_ })
-                            roots = $roots; agb = $ver })
+                            roots = $roots; agb = $ver }) }
 Write-Output "port=$($c.Port) app=$($c.Version) conv_id=$cid"
 Write-Output $msgId

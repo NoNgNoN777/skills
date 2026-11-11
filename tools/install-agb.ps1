@@ -9,7 +9,8 @@ $src = [IO.File]::ReadAllText((Convert-Path -LiteralPath $Installer), [Text.Enco
 $ver = if ($src -match 'AGB-VERSION:\s*(\S+)') { $Matches[1] } else { '?' }
 $pat = '(?s)<!-- AGB-FILE path="([^"]+)" bom="(yes|no)" -->[ \t]*\r?\n````[a-z]*[ \t]*\r?\n(.*?)\r?\n````[ \t]*\r?\n<!-- AGB-END -->'
 $blocks = [regex]::Matches($src, $pat)
-if ($blocks.Count -ne 10) { throw "ไฟล์ติดตั้งควรมี 10 ไฟล์ แต่เจอ $($blocks.Count) (ไฟล์อาจถูกตัดหรือแก้รูปแบบ AGB-FILE) · ดาวน์โหลดไฟล์ติดตั้งใหม่" }
+$want = if ($src -match 'AGB-COUNT:\s*(\d+)') { [int]$Matches[1] } else { -1 }
+if ($want -lt 1 -or $blocks.Count -ne $want) { throw "ไฟล์ติดตั้งควรมี $want ไฟล์ แต่เจอ $($blocks.Count) (ไฟล์อาจถูกตัดหรือแก้รูปแบบ AGB-FILE) · ดาวน์โหลดไฟล์ติดตั้งใหม่" }
 $stamp  = Get-Date -Format 'yyyyMMdd-HHmmss'
 $bakDir = Join-Path $Root ".agent-bridge\backup\$stamp"
 $n = 0
@@ -42,6 +43,16 @@ if (-not $DryRun) {
             Write-Output "ย้ายไฟล์สำรองเก่า: $($old.FullName) -> $to"
         }
     }
+}
+# skill รุ่นเก่าที่รวมเป็น ai-bridge แล้ว: ย้ายไป backup\ (ไม่ลบ) ไม่งั้นจะมี skill ซ้ำกันสองตัว
+foreach ($rel in '.claude\skills\antigravity-bridge', '.gemini\config\skills\claude-bridge', '.claude\skills\claude-codex-bridge', '.codex\skills\claude-codex-bridge') {
+    $old = Join-Path $Root $rel
+    if (-not (Test-Path -LiteralPath $old)) { continue }
+    if ($DryRun) { Write-Output "จะย้าย skill รุ่นเก่าไป backup: $old"; continue }
+    $to = Join-Path $bakDir ('old-skill_' + ($rel -replace '[\\/]', '_'))
+    New-Item -ItemType Directory -Force $bakDir | Out-Null
+    Move-Item -LiteralPath $old $to -Force
+    Write-Output "ย้าย skill รุ่นเก่าไป backup: $old -> $to"
 }
 if (-not $DryRun) {
     New-Item -ItemType Directory -Force (Join-Path $Root '.agent-bridge\to-claude') | Out-Null

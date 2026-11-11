@@ -3,4 +3,4 @@
 # แก้ไฟล์ต้นฉบับแล้ว ให้รัน python -I tools/build.py ก่อน เพื่อให้ dist\ เป็นรุ่นล่าสุด
 param([switch]$DryRun, [string]$Root = $HOME)
 $ErrorActionPreference = 'Stop'
-& (Join-Path $PSScriptRoot 'tools\install-agb.ps1') -Installer (Join-Path $PSScriptRoot 'dist\antigravity-bridge-installer.md') -DryRun:$DryRun -Root $Root
+& (Join-Path $PSScriptRoot 'tools\install-agb.ps1') -Installer (Join-Path $PSScriptRoot 'dist\ai-bridge-installer.md') -DryRun:$DryRun -Root $Root
