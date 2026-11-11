@@ -73,6 +73,62 @@ function Add-AgbSendLog([Collections.IDictionary]$rec) {
     } catch { }
 }
 
+# root ของ repo ที่ใช้ตีความ path แบบ relative ในคำตอบ (apps/... ของ monorepo): โฟลเดอร์ที่มี .git ของไฟล์แนบ + root ที่ระบุเอง
+function Get-AgbRepoRoots([string[]]$paths) {
+    $roots = @()
+    foreach ($p in $paths) {
+        if (-not $p -or -not (Test-Path -LiteralPath $p)) { continue }
+        $d = (Get-Item -LiteralPath $p).FullName
+        if (-not (Test-Path -LiteralPath $d -PathType Container)) { $d = Split-Path $d -Parent }
+        $hit = $d
+        for ($x = $d; $x; $x = Split-Path $x -Parent) { if (Test-Path -LiteralPath (Join-Path $x '.git')) { $hit = $x; break } }
+        $roots += $hit
+    }
+    return @($roots | Select-Object -Unique)
+}
+
+# ตรวจโค้ดที่ Gemini ยกมาพร้อม path:line เทียบกับไฟล์จริง (Gemini เคยอ้างเนื้อหาไฟล์ที่ไม่มีอยู่จริงหลายรอบ)
+# ต่อ 1 จุดอ้าง: หาไฟล์ (absolute หรือ relative ต่อ roots) แล้วเทียบบรรทัดในบล็อกโค้ดถัดไปกับไฟล์ช่วง ±20 บรรทัด
+# คืนข้อความสรุปไว้พิมพ์หัวคำตอบ · ไม่มีจุดอ้างเลยคืนค่าว่าง
+function Test-AgbQuotes([string]$reply, [string[]]$roots) {
+    $norm = { param($s) ($s -replace '\s+', ' ').Trim() }
+    $cite = '`(?<p>[^`\r\n]+?\.[A-Za-z0-9]{1,6}):(?<a>\d+)(?:[-–](?<b>\d+))?(?:,[\d\-–, ]+)?`|(?<p>(?:[A-Za-z]:[\\/])?[\w.@()\[\]-]+(?:[\\/][\w.@()\[\]-]+)+\.[A-Za-z0-9]{1,6}):(?<a>\d+)(?:[-–](?<b>\d+))?'
+    $ms = [regex]::Matches($reply, $cite)
+    if (-not $ms.Count) { return '' }
+    $resolve = { param($rel) foreach ($cand in @($rel) + @($roots | ForEach-Object { Join-Path $_ ($rel -replace '/', '\') })) {
+        if ($cand -and (Test-Path -LiteralPath $cand -PathType Leaf)) { return (Get-Item -LiteralPath $cand).FullName } } }
+    # อ้างแค่ชื่อไฟล์หรือ path ท่อนท้าย (tab-feature.tsx:231, ui/tabs.tsx:32): จับคู่กับไฟล์ที่อ้างแบบ path เต็มไว้ในคำตอบนี้
+    # ด้วยส่วนท้ายของ path · เจอได้มากกว่า 1 ไฟล์ (globals.css มีหลายที่) = กำกวม ไม่ตรวจ ดีกว่าเดาผิดไฟล์
+    $known = @($ms | ForEach-Object { $r = $_.Groups['p'].Value.Trim(); if ($r -match '[\\/]') { & $resolve $r } } | Where-Object { $_ } | Select-Object -Unique)
+    $bySuffix = { param($rel) $t = '\' + ($rel -replace '/', '\').TrimStart('\'); $c = @($known | Where-Object { $_.EndsWith($t, [StringComparison]::OrdinalIgnoreCase) }); if ($c.Count -eq 1) { $c[0] } }
+    $ok = 0; $bad = @(); $nofile = @(); $skip = 0; $seen = @{}
+    for ($i = 0; $i -lt $ms.Count; $i++) {
+        $m = $ms[$i]; $rel = $m.Groups['p'].Value.Trim(); $a = [int]$m.Groups['a'].Value
+        $b = if ($m.Groups['b'].Success) { [int]$m.Groups['b'].Value } else { $a }
+        $key = "$rel`:$a-$b"; if ($seen[$key]) { continue }; $seen[$key] = 1
+        $file = if ($rel -match '[\\/]') { & $resolve $rel }; if (-not $file) { $file = & $bySuffix $rel }
+        if (-not $file) { if ($rel -match '[\\/]' -and $rel -notmatch '^@') { $nofile += "$rel`:$a" } else { $skip++ }; continue }
+        $lines = [IO.File]::ReadAllLines($file, [Text.Encoding]::UTF8)
+        if ($a -gt $lines.Count) { $bad += "$rel`:$a — ไฟล์มีแค่ $($lines.Count) บรรทัด"; continue }
+        # บล็อกโค้ดที่อยู่ถัดจากจุดอ้าง (ภายใน 400 ตัวอักษร และก่อนจุดอ้างถัดไป)
+        $end = if ($i + 1 -lt $ms.Count) { $ms[$i + 1].Index } else { $reply.Length }
+        $after = $reply.Substring($m.Index + $m.Length, [Math]::Min($end, $reply.Length) - ($m.Index + $m.Length))
+        $blk = [regex]::Match($after, '(?s)^.{0,400}?```[^\r\n]*\r?\n(.*?)\r?\n\s*```')
+        if (-not $blk.Success) { $ok++; continue }   # อ้างเลขบรรทัดอย่างเดียว: ผ่านถ้าบรรทัดมีจริง
+        $code = @($blk.Groups[1].Value -split '\r?\n' | ForEach-Object { & $norm $_ } | Where-Object { $_.Length -ge 6 -and $_ -notmatch '^(\.\.\.|…|//\s*\.\.\.)' })
+        if (-not $code.Count) { $ok++; continue }
+        $lo = [Math]::Max(0, $a - 21); $hi = [Math]::Min($lines.Count - 1, $b + 19)
+        $win = @($lines[$lo..$hi] | ForEach-Object { & $norm $_ })
+        $hit = @($code | Where-Object { $c = $_; $win | Where-Object { $_.Contains($c) -or ($c.Length -gt 40 -and $_.Length -ge 20 -and $c.Contains($_)) } | Select-Object -First 1 }).Count
+        if ($hit / $code.Count -ge 0.6) { $ok++ } else { $bad += "$rel`:$a — โค้ดที่ยกมาตรงไฟล์จริงแค่ $hit/$($code.Count) บรรทัด" }
+    }
+    $total = $ok + $bad.Count + $nofile.Count
+    $out = "[ตรวจหลักฐาน: อ้าง $($total + $skip) จุด · ตรง $ok · ไม่ตรง $($bad.Count) · หาไฟล์ไม่เจอ $($nofile.Count) · ไม่ได้ตรวจ $skip (อ้างแค่ชื่อไฟล์หรือชื่อแพ็กเกจ)$(if ($bad.Count) { ' · ข้อที่อ้างไม่ตรงห้ามใช้จนกว่าจะเปิดไฟล์ดูเอง (ไฟล์ที่แก้หลังส่งงานไปจะขึ้นไม่ตรงได้)' })]"
+    foreach ($x in ($bad | Select-Object -First 12)) { $out += "`n  - ไม่ตรง: $x" }
+    foreach ($x in ($nofile | Select-Object -First 6)) { $out += "`n  - หาไฟล์ไม่เจอ: $x" }
+    return $out
+}
+
 # ย้ายไฟล์คำตอบที่เก่ากว่า N วันไป to-claude\archive\<yyyyMM>\ (ย้าย ไม่ลบ) · ข้ามไฟล์ที่ยังรออยู่ (partial / need-user)
 function Move-AgbOldReplies([int]$Days = 14) {
     $n = 0

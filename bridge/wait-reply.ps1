@@ -37,6 +37,14 @@ while ((Get-Date) -lt $deadline) {
             if ($mine -and $fm -match '(?m)^skill_version:\s*["'']?([^"''\s]+)' -and $Matches[1] -ne $mine) {
                 Write-Output "[เตือน: skill claude-bridge ฝั่ง Gemini รุ่น $($Matches[1]) แต่สคริปต์รุ่น $mine · ติดตั้งใหม่ แล้วเปิดแชทใหม่ใน Antigravity ให้โหลด skill รุ่นล่าสุด]"
             }
+            # ตรวจโค้ดที่ยกมาพร้อม path:line เทียบไฟล์จริง (root ของ repo มาจาก sends.jsonl ตอนส่ง) · ตรวจไม่ได้ก็ไม่ทำให้การรับคำตอบล้ม
+            try {
+                . (Join-Path $PSScriptRoot 'agb-common.ps1')
+                $rec = Get-Content -LiteralPath (Join-Path $PSScriptRoot 'sends.jsonl') -Encoding UTF8 -ErrorAction Stop |
+                       Where-Object { $_ -like "*`"$MsgId`"*" } | Select-Object -Last 1 | ConvertFrom-Json
+                $qv = Test-AgbQuotes $last @(@($rec.roots) + @((Get-Location).Path) | Where-Object { $_ })
+                if ($qv) { Write-Output $qv }
+            } catch { Write-Output "[ตรวจหลักฐานไม่ได้: $($_.Exception.Message)]" }
             Write-Output $last; exit 0
         }
     }

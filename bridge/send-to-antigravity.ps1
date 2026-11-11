@@ -1,5 +1,5 @@
 ﻿# ส่งข้อความจาก Claude Code เข้าแชท Antigravity ที่เปิดอยู่ พร้อมหัวข้อความ CLAUDE-BRIDGE ให้ Gemini รู้ว่าใครส่งและตอบกลับทางไหน
-# ใช้:  & send-to-antigravity.ps1 -ConvId <uuid> -MessageFile <utf8.txt> [-From <ชื่อแชท Claude>] [-Files <path>,<path>] [-Review]
+# ใช้:  & send-to-antigravity.ps1 -ConvId <uuid> -MessageFile <utf8.txt> [-From <ชื่อแชท Claude>] [-Files <path>,<path>] [-Skills <ชื่อ>,<ชื่อ>] [-Root <repo>] [-Review]
 #       & send-to-antigravity.ps1 -New [-Model flash|pro|flash_lite] [-Title <ชื่อ>] -Project <ชื่อ> -MessageFile <utf8.txt>
 # พิมพ์ msg_id ออกมาบรรทัดสุดท้าย เอาไปใช้กับ wait-reply.ps1 · ทุกครั้งที่ส่งบันทึกลง sends.jsonl (ดูงานค้างด้วย pending.ps1)
 param(
@@ -12,6 +12,8 @@ param(
     [string]$Project,  # ชื่อหรือ id ของโปรเจกต์ Antigravity (ใช้ตอน -New) ดูรายชื่อด้วย list-chats.py --projects
     [string[]]$Files,  # ไฟล์ที่ให้ Gemini เปิดอ่านเอง: ตรวจว่ามีจริง ไม่ใช่ไฟล์ความลับ แล้วแนบ path เต็ม ขนาด และจำนวนบรรทัดท้ายบรีฟ
     [switch]$Review,   # งานรีวิว/ตรวจสอบ: บังคับให้ทุกข้อค้นพบมีความรุนแรง ความมั่นใจ และหลักฐาน path:line
+    [string[]]$Skills, # skill ที่ Gemini ต้องอ่านก่อนเริ่ม: ชื่อ skill ของ Claude (ui-compare-pw, mattpocock-skills:grilling) หรือ path ของ SKILL.md / โฟลเดอร์ skill
+    [string[]]$Root,   # root ของ repo ที่ใช้ตีความ path แบบ relative ในคำตอบ (ปกติหาเองจากไฟล์แนบ + โฟลเดอร์ปัจจุบัน)
     [switch]$SkipSecretScan   # ข้ามตัวตรวจความลับ · ใช้เมื่อผู้ใช้ยืนยันแล้วว่าที่เจอไม่ใช่ความลับจริงเท่านั้น
 )
 . (Join-Path $PSScriptRoot 'agb-common.ps1')
@@ -42,8 +44,31 @@ if ($problems) {
     throw "หยุดส่ง: อาจมีความลับ`n$($problems -join "`n")`nลบหรือปิดค่าเหล่านั้น หรือเอาไฟล์นั้นออกแล้วส่งใหม่ · ถ้าผู้ใช้ยืนยันว่าไม่ใช่ความลับจริง ใส่ -SkipSecretScan"
 }
 if ($attach) { $body += "`n`nไฟล์ที่เกี่ยวข้อง (เปิดอ่านเองด้วย read_file · ไฟล์เกิน ~800 บรรทัดให้ทยอยอ่านเป็นช่วง):`n$($attach -join "`n")" }
+
+# skill ของ Claude ที่ให้ Gemini อ่านแล้วทำตาม: ส่งแค่ path ของ SKILL.md (ไฟล์อ้างอิงที่ skill ชี้ไป Gemini เปิดเองเมื่อถึงขั้นนั้น)
+$skillLines = @()
+foreach ($s in $Skills) {
+    if (-not $s) { continue }
+    $md = $null
+    if (Test-Path -LiteralPath $s -PathType Leaf) { $md = (Get-Item -LiteralPath $s).FullName }
+    elseif (Test-Path -LiteralPath (Join-Path $s 'SKILL.md')) { $md = (Get-Item -LiteralPath (Join-Path $s 'SKILL.md')).FullName }
+    else {
+        $name = ($s -split ':')[-1]   # plugin:skill → skill
+        $cands = @(Join-Path $HOME ".claude\skills\$name\SKILL.md") +
+                 @(Get-ChildItem (Join-Path $HOME '.claude\skills') -Directory -ErrorAction SilentlyContinue | ForEach-Object { Join-Path $_.FullName "$name\SKILL.md" }) +
+                 @(Get-ChildItem (Join-Path $HOME '.claude\plugins\cache') -Recurse -Filter SKILL.md -ErrorAction SilentlyContinue | Where-Object { $_.Directory.Name -eq $name } | ForEach-Object FullName)
+        $md = $cands | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+    }
+    if (-not $md) { throw "ไม่พบ skill: $s (ใส่ชื่อโฟลเดอร์ skill หรือ path ของ SKILL.md)" }
+    $skillLines += "- $s → $md"
+}
+if ($skillLines) {
+    $body = "skill ที่ต้องอ่านก่อนเริ่มงาน (เปิด SKILL.md ด้วย read_file ให้จบ แล้วทำงานตามขั้นตอนและกติกาใน skill · ไฟล์อ้างอิงที่ skill ชี้ไป เปิดเมื่อถึงขั้นนั้น · ขั้นที่ต้องใช้เครื่องมือที่ Antigravity ไม่มี ให้ทำส่วนที่ทำได้แล้วบอกในคำตอบว่าข้ามขั้นไหนเพราะอะไร):`n$($skillLines -join "`n")`n`n" + $body
+}
+# root สำหรับตรวจหลักฐานตอนรับคำตอบ (wait-reply.ps1 อ่านจาก sends.jsonl)
+$roots = @(Get-AgbRepoRoots (@($Root) + @($Files) + @((Get-Location).Path)))
 if ($Review) {
-    $body += "`n`nรูปแบบข้อค้นพบ (งานรีวิว บังคับทุกข้อ):`n- หัวข้อ: [ความรุนแรง สูง/กลาง/ต่ำ · ความมั่นใจ สูง/กลาง/ต่ำ] สรุป 1 บรรทัด`n- หลักฐาน: path:line พร้อมข้อความที่ยกมาสั้นๆ (ถ้าไม่มีหลักฐานในไฟล์ ให้เขียนว่า `"ไม่มีหลักฐานตรง`" และลดความมั่นใจเป็นต่ำ)`n- เสนอแก้: ถ้ามี`nเรียงจากความรุนแรงมากไปน้อย"
+    $body += "`n`nรูปแบบข้อค้นพบ (งานรีวิว บังคับทุกข้อ):`n- หัวข้อ: [ความรุนแรง สูง/กลาง/ต่ำ · ความมั่นใจ สูง/กลาง/ต่ำ] สรุป 1 บรรทัด`n- หลักฐาน: path จาก root ของ repo:line แล้วตามด้วยบล็อกโค้ดที่คัดลอกจากผล read_file รอบนี้ตรงตัว 1–5 บรรทัด · Claude เทียบบล็อกนี้กับไฟล์จริงอัตโนมัติ ข้อที่ไม่ตรงถูกตัดทิ้งทั้งข้อ (ถ้าไม่มีหลักฐานในไฟล์ ให้เขียนว่า `"ไม่มีหลักฐานตรง`" และลดความมั่นใจเป็นต่ำ)`n- ข้อที่บอกว่า `"ไม่มี`" หรือ `"ไม่พบ`": บอกคำค้นและโฟลเดอร์ที่ค้นด้วย grep_search`n- เสนอแก้: ถ้ามี`nเรียงจากความรุนแรงมากไปน้อย"
 }
 
 $pvar = Get-AgbOverride 'env_project'; if (-not $pvar) { $pvar = 'ANTIGRAVITY_PROJECT_ID' }
@@ -112,6 +137,7 @@ try { [IO.File]::WriteAllText((Join-Path $AgbRoot 'last-send.log'), "$(Get-Date 
 # บันทึกแค่ข้อมูลระบุงาน ไม่เก็บเนื้อหาบรีฟ
 Add-AgbSendLog ([ordered]@{ time = (Get-Date).ToString('s'); msg_id = $msgId; conv_id = $cid; from = $From
                             title = $(if ($New) { $Title } else { '' }); new = [bool]$New; model = $Model; project = $Project
-                            review = [bool]$Review; files = @($Files | Where-Object { $_ }).Count; agb = $ver })
+                            review = [bool]$Review; files = @($Files | Where-Object { $_ }).Count; skills = @($Skills | Where-Object { $_ })
+                            roots = $roots; agb = $ver })
 Write-Output "port=$($c.Port) app=$($c.Version) conv_id=$cid"
 Write-Output $msgId

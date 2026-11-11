@@ -5,7 +5,7 @@ description: ไฟล์ติดตั้งระบบ agent-bridge ให�
 
 # ไฟล์ติดตั้ง agent-bridge: Claude Code ⇄ Antigravity
 
-<!-- AGB-VERSION: 2026.11.03.2 -->
+<!-- AGB-VERSION: 2026.11.05.1 -->
 
 ## สำหรับคน (อ่านส่วนนี้ส่วนเดียวพอ)
 
